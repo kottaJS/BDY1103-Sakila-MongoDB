@@ -1,170 +1,96 @@
 // =============================================================================
 // SELECCIÓN DE BASE DE DATOS
 // =============================================================================
-// [QUÉ ES]: Selecciona la base de datos 'sakila'.
-// [PARA QUÉ SIRVE]: Indica que todas las consultas de abajo se ejecutan sobre 'sakila'.
+// [EN SIMPLE]: Le decimos a MongoDB que trabaje sobre la base de datos 'sakila'.
+// [POR QUÉ]: Si no ponemos esto, Mongo guardaría las cosas en una base temporal llamada 'test'.
 use('sakila');
 
 // -----------------------------------------------------------------------------
 // VERIFICACIÓN INICIAL DE ESTADO DE COLECCIONES
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Conteo inicial de registros en cada una de las 4 colecciones.
-// [PARA QUÉ SIRVE]: Para confirmar que los datos se importaron bien antes de empezar a operar.
-// [POR QUÉ ESTÁ AQUÍ]: Muestra en pantalla que tenemos: 599 clientes, 1.000 películas, 603 direcciones y 2 tiendas.
+// [EN SIMPLE]: Contamos cuántas cosas hay guardadas antes de empezar a hacer nada.
+// [RESULTADO ESPERADO]: 599 clientes, 1.000 películas, 603 direcciones y 2 tiendas físicas.
 print("\n>>> Comprobación de estado inicial de colecciones...");
-print("Documentos en 'customer': " + db.customer.countDocuments()); // Cuenta clientes (599)
-print("Documentos en 'film':     " + db.film.countDocuments());     // Cuenta películas (1.000)
-print("Documentos en 'location': " + db.location.countDocuments()); // Cuenta direcciones (603)
-print("Documentos en 'store':    " + db.store.countDocuments());    // Cuenta tiendas (2)
+print("Documentos en 'customer' (Clientes):    " + db.customer.countDocuments()); // Da 599
+print("Documentos en 'film' (Películas):       " + db.film.countDocuments());     // Da 1.000
+print("Documentos en 'location' (Direcciones): " + db.location.countDocuments()); // Da 603
+print("Documentos en 'store' (Tiendas):        " + db.store.countDocuments());    // Da 2
 
 
 // =============================================================================
-// SECCIÓN ESPECIAL I: TAREA DE LOCATIONS (EQUIVALENTE A LEFT JOIN EN MONGODB)
+// SECCIÓN ESPECIAL I: TAREA DE LOCATIONS (REVISIÓN DE DIRECCIONES)
 // =============================================================================
-// [OBJETIVO]: Encontrar qué direcciones están registradas pero NO son utilizadas por nadie.
-// [EQUIVALENTE SQL]: SELECT a.* FROM address a LEFT JOIN customer c ON a.address_id = c.address_id WHERE c.customer_id IS NULL;
+// [OBJETIVO]: Encontrar si hay direcciones guardadas donde NO viva ningún cliente.
 print("\n=====================================================================");
-print("TAREA DE LOCATIONS: CHEQUEO DE DIRECCIONES NO USADAS (EQUIVALENTE SQL)");
-
+print("TAREA DE LOCATIONS: CHEQUEO DE DIRECCIONES NO USADAS");
+print("=====================================================================");
 
 // -----------------------------------------------------------------------------
-// 1. DIRECCIONES NO USADAS POR CLIENTES
+// 1. DIRECCIONES DONDE NO VIVE NINGÚN CLIENTE
 // -----------------------------------------------------------------------------
-// [EN ESPAÑOL SIMPLE]: Revisa la lista de direcciones y pregunta:
-// ¿Hay alguna dirección registrada donde NO viva ningún cliente?
-// [RESPUESTA REAL]: Sí, solo 4 direcciones (las 2 tiendas y los 2 empleados).
+// [LA PREGUNTA]: De las 603 direcciones, ¿hay alguna donde no viva ningún cliente?
+// [LA RESPUESTA]: Sí, hay exactamente 4 direcciones: IDs 1, 2, 3 y 4.
+// [POR QUÉ EXISTEN]: La 1 y 2 son las TIENDAS. La 3 y 4 son los EMPLEADOS (Mike y Jon).
 print("\n[LOC-1] Direcciones NO usadas por Clientes (primeras 5):");
 const locNoClientes = db.location.aggregate([
   {
     // $lookup: Va a la lista de clientes y busca quién vive en esta dirección.
     $lookup: {
-      from: "customer",            // Mira en la colección de clientes
-      localField: "addressId",     // El ID de la dirección actual
-      foreignField: "addressId",   // El ID de dirección que tiene guardado el cliente
-      as: "clientes"               // Guarda a los clientes que viven ahí dentro de una lista
+      from: "customer",          // Revisa en la colección 'customer'
+      localField: "addressId",   // Toma el número de dirección de la casa
+      foreignField: "addressId", // Busca qué cliente tiene ese mismo número de dirección
+      as: "clientes"             // Guarda los clientes encontrados adentro de una lista llamada 'clientes'
     }
   },
   {
-    // $match: Se queda únicamente con las direcciones donde la lista 'clientes' está vacía (nadie vive ahí).
-    // "clientes.0": { $exists: false } significa: "la lista no tiene ni un primer cliente".
+    // $match: Filtra y se queda solo con las casas donde la lista 'clientes' está vacía (nadie vive ahí).
+    // "clientes.0": { $exists: false } significa literalmente: "la lista no tiene ni un primer cliente".
     $match: {
       "clientes.0": { $exists: false }
     }
   },
   {
-    // $project: Selecciona qué columnas mostrar en la pantalla limpia.
+    // $project: Selecciona qué datos mostrar en pantalla limpia.
     $project: {
-      _id: 0,                                 // 0 = Oculta el ID interno de Mongo
-      addressId: 1,                           // 1 = Muestra el ID de la dirección
-      address: 1,                             // 1 = Muestra el texto de la calle
-      cantidadClientes: { $size: "$clientes" } // $size = Muestra cuántos clientes hay (dará 0)
+      _id: 0,                                 // Oculta el ID raro de Mongo (_id)
+      addressId: 1,                           // Muestra el número de dirección (1, 2, 3, 4)
+      address: 1,                             // Muestra el nombre de la calle
+      cantidadClientes: { $size: "$clientes" } // Muestra cuántos clientes viven ahí (dará 0)
     }
   },
   { 
-    // $sort: Ordena por addressId de menor a mayor (1 = ascendente).
+    // $sort: Ordena de menor a mayor por número de dirección (1 = ascendente).
     $sort: { addressId: 1 } 
   }
-]).toArray(); // .toArray() convierte el cursor en una lista imprimible
-printjson(locNoClientes); // Imprime el resultado en formato JSON legible
-
-
-// -----------------------------------------------------------------------------
-// 2. DIRECCIONES NO USADAS POR EMPLEADOS (STAFF)
-// -----------------------------------------------------------------------------
-// [QUÉ ES]: Cruza 'location' con 'store.staff' para ver qué direcciones no son de empleados.
-// [NOTA TÉCNICA]: En Mongo, los empleados (staff) están embebidos dentro de cada tienda (store).
-print("\n[LOC-2] Direcciones NO usadas por Empleados (staff) (primeras 5 de 601):");
-const locNoStaff = db.location.aggregate([
-  {
-    // $lookup: Cruza 'location' con la colección 'store', buscando dentro del subdocumento 'staff'.
-    $lookup: {
-      from: "store",
-      localField: "addressId",
-      foreignField: "staff.addressId", // Apunta al addressId que tiene el empleado dentro de store
-      as: "empleados"
-    }
-  },
-  {
-    // Filtra las direcciones donde el arreglo 'empleados' está vacío.
-    $match: {
-      "empleados.0": { $exists: false }
-    }
-  },
-  {
-    // Proyecta los campos útiles.
-    $project: {
-      _id: 0,
-      addressId: 1,
-      address: 1,
-      cantidadStaff: { $size: "$empleados" }
-    }
-  },
-  { $sort: { addressId: 1 } },
-  { $limit: 5 } // Muestra solo las primeras 5 para no saturar la pantalla
 ]).toArray();
-printjson(locNoStaff);
-
-
-// -----------------------------------------------------------------------------
-// 3. DIRECCIONES NO USADAS POR TIENDAS (STORE)
-// -----------------------------------------------------------------------------
-// [QUÉ ES]: Cruza 'location' con 'store' para ver qué direcciones no corresponden a tiendas físicas.
-print("\n[LOC-3] Direcciones NO usadas por Tiendas (store) (primeras 5 de 601):");
-const locNoStore = db.location.aggregate([
-  {
-    $lookup: {
-      from: "store",
-      localField: "addressId",
-      foreignField: "addressId",
-      as: "tiendas"
-    }
-  },
-  {
-    // Filtra las direcciones donde el arreglo 'tiendas' está vacío.
-    $match: {
-      "tiendas.0": { $exists: false }
-    }
-  },
-  {
-    $project: {
-      _id: 0,
-      addressId: 1,
-      address: 1,
-      cantidadTiendas: { $size: "$tiendas" }
-    }
-  },
-  { $sort: { addressId: 1 } },
-  { $limit: 5 }
-]).toArray();
-printjson(locNoStore);
+printjson(locNoClientes); // Imprime el resultado en formato legible
 
 
 // =============================================================================
 // SECCIÓN ESPECIAL II: CORRECCIÓN Y REESTRUCTURACIÓN DEL MODELO DE DATOS
 // =============================================================================
-// [OBJETIVO]: Limpiar las estructuras intermedias que quedaron de la migración relacional
-//             y dejar un modelo 100% nativo y limpio de MongoDB.
+// [OBJETIVO]: Limpiar la basura que quedó de SQL y dejar un modelo moderno en MongoDB.
 print("\n=====================================================================");
 print("CORRECCIÓN DE MODELO: DESNORMALIZACIÓN DOCUMENTAL");
-
+print("=====================================================================");
 
 // -----------------------------------------------------------------------------
-// T-1: En 'film', transformar 'filmCategories' (array) en objeto directo 'category'
+// T-1: En 'film', transformar 'filmCategories' en objeto directo 'category'
 // -----------------------------------------------------------------------------
-// [PROBLEMA]: Al migrar de SQL, la categoría quedó como un arreglo innecesario: filmCategories: [{ categoryId: 14, name: 'Sci-Fi' }].
-// [SOLUCIÓN]: En Mongo, una película pertenece a UNA categoría; debe ser un objeto directo: category: { categoryId: 14, name: 'Sci-Fi' }.
-print("\n[T-1] Transformando 'filmCategories' en objeto 'category' en colección film...");
+// [EL PROBLEMA]: La categoría de la película venía metida en una lista innecesaria: filmCategories: [{ categoryId: 14, name: 'Sci-Fi' }].
+// [LA SOLUCIÓN]: Una película tiene UNA sola categoría. Debe ser un objeto directo: category: { categoryId: 14, name: 'Sci-Fi' }.
+print("\n[T-1] Transformando 'filmCategories' en objeto directo 'category' en film...");
 db.film.updateMany(
-  { filmCategories: { $exists: true } }, // Aplica a todas las películas que tengan el campo viejo
+  { filmCategories: { $exists: true } }, // Se aplica a todas las películas que tengan el campo viejo
   [
     {
       $set: {
-        // $arrayElemAt: Extrae el elemento en la posición 0 del arreglo viejo
+        // $arrayElemAt: Toma la primera categoría de la lista vieja (posición 0) y la guarda como objeto limpio
         category: { $arrayElemAt: ["$filmCategories.category", 0] }
       }
     },
     {
-      // $unset: Elimina por completo el campo viejo 'filmCategories' para no duplicar datos
+      // $unset: Borra para siempre la lista vieja 'filmCategories' para no duplicar datos
       $unset: "filmCategories"
     }
   ]
@@ -174,18 +100,18 @@ printjson(db.film.findOne({ filmId: 307 }, { _id: 0, filmId: 1, title: 1, catego
 
 
 // -----------------------------------------------------------------------------
-// T-2: En 'film', transformar 'filmActors' en array directo y limpio 'actors'
+// T-2: En 'film', transformar 'filmActors' en lista limpia de actores 'actors'
 // -----------------------------------------------------------------------------
-// [PROBLEMA]: El arreglo 'filmActors' traía campos intermedios de la tabla puente SQL.
-// [SOLUCIÓN]: Usar $map para dejar un arreglo limpio solo con los datos del actor: { actorId, firstName, lastName }.
-print("\n[T-2] Transformando 'filmActors' en array directo de actores 'actors'...");
+// [EL PROBLEMA]: La lista de actores traía columnas intermedias viejas de la tabla puente de SQL.
+// [LA SOLUCIÓN]: Usar $map para dejar una lista limpia que solo tenga: { actorId, firstName, lastName }.
+print("\n[T-2] Transformando 'filmActors' en lista directa de actores 'actors'...");
 db.film.updateMany(
-  { filmActors: { $exists: true } },
+  { filmActors: { $exists: true } }, // Aplica a todas las películas con la lista vieja
   [
     {
       $set: {
         actors: {
-          // $map: Recorre cada elemento 'fa' del arreglo 'filmActors' y extrae solo su subdocumento 'actor'
+          // $map: Recorre cada actor 'fa' de la lista vieja y extrae solo sus datos limpios
           $map: {
             input: "$filmActors",
             as: "fa",
@@ -195,25 +121,25 @@ db.film.updateMany(
       }
     },
     {
-      // Borra el campo viejo con la estructura intermedia
+      // Borra la lista vieja que tenía los campos intermedios
       $unset: "filmActors"
     }
   ]
 );
-print("Ficha de película actualizada (muestra de primeros 2 actores):");
+print("Ficha de película actualizada (muestra de primeros 2 actores en lista limpia):");
 printjson(db.film.findOne({ filmId: 307 }, { _id: 0, filmId: 1, title: 1, actors: { $slice: 2 } }));
 
 
 // -----------------------------------------------------------------------------
-// T-3: En 'customer', anidar cada 'payment' adentro de su respectivo 'rental'
+// T-3: En 'customer', guardar cada 'payment' adentro de su arriendo en 'rentals'
 // -----------------------------------------------------------------------------
-// [PROBLEMA]: En SQL, los pagos estaban en una tabla separada 'payment'.
-// [SOLUCIÓN]: En la vida real, un pago siempre le pertenece a un arriendo específico. Lo guardamos dentro de 'rentals'.
-print("\n[T-3] Anidando objeto 'payment' dentro de cada arriendo en 'rentals'...");
+// [EL PROBLEMA]: En SQL, los pagos de plata estaban en una tabla separada 'payment'.
+// [LA SOLUCIÓN]: En la vida real, un pago es la boleta de un arriendo. Lo guardamos adentro del arriendo al que pertenece.
+print("\n[T-3] Guardando comprobante de pago adentro de cada arriendo en 'rentals'...");
 db.customer.find({ payments: { $exists: true } }).forEach(function(cust) {
   if (!cust.rentals) return;
 
-  // 1. Crea un diccionario rápido de pagos indexado por 'rentalId'
+  // 1. Arma una lista rápida con los pagos del cliente usando su rentalId
   var paymentMap = {};
   if (cust.payments) {
     cust.payments.forEach(function(p) {
@@ -229,40 +155,41 @@ db.customer.find({ payments: { $exists: true } }).forEach(function(cust) {
     });
   }
 
-  // 2. Recorre cada arriendo del cliente y le inyecta su pago correspondiente
+  // 2. Recorre cada arriendo del cliente y le mete su comprobante de pago adentro
   var updatedRentals = cust.rentals.map(function(r) {
     var rObj = Object.assign({}, r);
     rObj.payment = paymentMap[r.rentalId] || null; // Si tiene pago lo guarda, si no deja null
     return rObj;
   });
 
-  // 3. Actualiza el documento del cliente en MongoDB
+  // 3. Guarda los arriendos con sus pagos embebidos y borra la lista vieja suelta
   db.customer.updateOne(
     { _id: cust._id },
     {
-      $set: { rentals: updatedRentals }, // Guarda la lista de arriendos con pagos adentro
+      $set: { rentals: updatedRentals }, // Guarda la lista nueva con pagos integrados
       $unset: { payments: "" }           // Borra la lista vieja de pagos sueltos
     }
   );
 });
-print("Ficha de cliente actualizada (muestra de arriendo con pago anidado):");
+print("Ficha de cliente actualizada (muestra de arriendo con pago integrado adentro):");
 printjson(db.customer.findOne({ customerId: 347 }, { _id: 0, customerId: 1, firstName: 1, "rentals": { $slice: 1 } }));
 
 
 // =============================================================================
-// 1. OPERACIONES CREATE (INSERCIONES)
+// 1. OPERACIONES CREATE (INSERTAR DATOS NUEVOS)
 // =============================================================================
+// [OBJETIVO]: Demostrar que podemos guardar registros nuevos completos de una sola vez.
 print("\n=====================================================================");
 print("1. OPERACIONES CREATE (INSERCIONES)");
-
+print("=====================================================================");
 
 // -----------------------------------------------------------------------------
-// C1: Inserción individual (insertOne) de una película con elenco y categoría embebidos
+// C1: Insertar una película nueva con actores y categoría adentro (insertOne)
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Da de alta una nueva película ('INCEPTION CHRONICLES') con ID 1001.
-// [POR QUÉ ESTÁ AQUÍ]: Demuestra que en Mongo guardamos la película con sus actores y categoría de una sola vez.
-print("\n[C1] Inserción de nueva película (filmId: 1001)...");
-db.film.deleteOne({ filmId: 1001 }); // Borrado preventivo para permitir re-ejecutar el script sin error de duplicado
+// [QUÉ ES]: Guarda la película 'INCEPTION CHRONICLES' con ID 1001.
+// [POR QUÉ ES MEJOR]: En SQL tendríamos que hacer 3 INSERTs en tablas distintas. En Mongo es 1 sola línea.
+print("\n[C1] Inserción de nueva película completa (filmId: 1001)...");
+db.film.deleteOne({ filmId: 1001 }); // Borrado preventivo para poder re-ejecutar sin error de ID repetido
 
 const resC1 = db.film.insertOne({
     filmId: 1001,
@@ -271,31 +198,30 @@ const resC1 = db.film.insertOne({
     releaseYear: "2026",
     languageId: 1,
     originalLanguageId: null,
-    rentalDuration: 5,
-    rentalRate: 4.99,
-    length: 148,
-    replacementCost: 24.99,
-    rating: "PG-13",
+    rentalDuration: 5,        // Días de arriendo permitidos
+    rentalRate: 4.99,          // Precio del arriendo en dólares
+    length: 148,               // Duración en minutos
+    replacementCost: 24.99,    // Costo si el cliente pierde el DVD
+    rating: "PG-13",           // Calificación de edad
     specialFeatures: "Trailers,Deleted Scenes,Behind the Scenes",
-    lastUpdate: new Date(),
-    // Arreglo de actores embebido directamente en la película
+    lastUpdate: new Date(),    // Fecha y hora actual
+    // Lista de actores embebida adentro de la película:
     actors: [
         { actorId: 201, firstName: "LEONARDO", lastName: "DICAPRIO", lastUpdate: new Date() },
         { actorId: 202, firstName: "MARION", lastName: "COTILLARD", lastUpdate: new Date() }
     ],
-    // Categoría embebida como objeto directo
+    // Categoría embebida como objeto directo:
     category: { categoryId: 14, name: "Sci-Fi", lastUpdate: new Date() },
-    // Idioma embebido como objeto directo
+    // Idioma embebido como objeto directo:
     language: { languageId: 1, name: "English", lastUpdate: new Date() }
 });
-printjson(resC1); // Imprime { acknowledged: true, insertedId: ... }
+printjson(resC1); // Muestra { acknowledged: true, insertedId: ... }
 
 
 // -----------------------------------------------------------------------------
-// C2: Inserción individual (insertOne) de un cliente con arriendo y pago integrado
+// C2: Insertar un cliente nuevo con su primer arriendo y su pago adentro (insertOne)
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Da de alta un nuevo cliente ('CARLOS MENDOZA') con ID 600.
-// [POR QUÉ ESTÁ AQUÍ]: Demuestra que el cliente se guarda junto a su historial de arriendo y comprobante de pago.
+// [QUÉ ES]: Guarda al cliente 'CARLOS MENDOZA' (ID 600) junto con la película que arrendó y su boleta.
 print("\n[C2] Inserción de nuevo cliente con arriendo y pago integrado (customerId: 600)...");
 db.customer.deleteOne({ customerId: 600 }); // Borrado preventivo
 
@@ -306,20 +232,20 @@ const resC2 = db.customer.insertOne({
     lastName: "MENDOZA",
     email: "CARLOS.MENDOZA@sakilacustomer.org",
     addressId: 10,
-    active: "1",
+    active: "1",               // 1 = Cliente activo
     createDate: new Date(),
     lastUpdate: new Date(),
-    // Arreglo de arriendos con el pago incrustado adentro
+    // Lista de arriendos con la boleta de pago adentro:
     rentals: [
         {
             rentalId: 16050,
             rentalDate: new Date(),
             inventoryId: 10,
             customerId: 600,
-            returnDate: null, // null significa que la película aún no ha sido devuelta
+            returnDate: null,  // null = Aún no devuelve la película
             staffId: 1,
             lastUpdate: new Date(),
-            // Pago anidado adentro del arriendo
+            // Boleta de pago guardada adentro del arriendo:
             payment: {
                 paymentId: 16050,
                 amount: 4.99,
@@ -334,10 +260,10 @@ printjson(resC2);
 
 
 // -----------------------------------------------------------------------------
-// C3: Inserción masiva (insertMany) en 'film'
+// C3: Inserción masiva de dos películas juntas (insertMany)
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Inserta múltiples películas (IDs 1002 y 1003) en una sola operación de red.
-// [POR QUÉ ESTÁ AQUÍ]: Demuestra la eficiencia de insertar lotes de datos en MongoDB.
+// [QUÉ ES]: Guarda dos películas (IDs 1002 y 1003) en un solo viaje al disco.
+// [POR QUÉ SE USA]: Es mucho más rápido guardar 100 películas juntas con insertMany que hacer 100 llamadas individuales.
 print("\n[C3] Inserción masiva de dos películas (filmId: 1002, 1003)...");
 db.film.deleteMany({ filmId: { $in: [1002, 1003] } }); // Borrado preventivo
 
@@ -377,32 +303,32 @@ printjson(resC3);
 
 
 // =============================================================================
-// 2. OPERACIONES READ (CONSULTAS Y FILTROS)
+// 2. OPERACIONES READ (HACER CONSULTAS Y REPORTES)
 // =============================================================================
+// [OBJETIVO]: Demostrar distintas formas de buscar datos sin usar JOINs.
 print("\n=====================================================================");
 print("2. OPERACIONES READ (CONSULTAS)");
-
+print("=====================================================================");
 
 // -----------------------------------------------------------------------------
-// R1: Consulta compuesta con operadores comparativos ($gt), orden y proyección
+// R1: Consulta con filtros combinados, orden y límite
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Busca películas PG-13, con tarifa 4.99 y duración > 120 minutos.
-// [OPERADORES]: $gt = Greater Than (mayor a).
-print("\n[R1] Películas PG-13 con duración > 120 min y tarifa 4.99 (Top 3 por duración):");
+// [QUÉ BUSCA]: Películas PG-13, que cuesten 4.99 y duren más de 120 minutos ($gt = greater than).
+// [ORDEN]: sort({ length: -1 }) las ordena de la más larga a la más corta (-1 = descendente).
+// [LÍMITE]: limit(3) trae solo las 3 primeras de la lista.
+print("\n[R1] Películas PG-13 con duración > 120 min y tarifa 4.99 (Top 3 más largas):");
 const resR1 = db.film.find(
-    // 1. Filtros de búsqueda (WHERE)
     { rating: "PG-13", rentalRate: 4.99, length: { $gt: 120 } },
-    // 2. Proyección de columnas (SELECT): 0 oculta, 1 muestra
-    { _id: 0, filmId: 1, title: 1, rating: 1, rentalRate: 1, length: 1 }
-).sort({ length: -1 }).limit(3).toArray(); // sort(-1) ordena de mayor a menor; limit(3) trae 3
+    { _id: 0, filmId: 1, title: 1, rating: 1, rentalRate: 1, length: 1 } // 0 oculta, 1 muestra
+).sort({ length: -1 }).limit(3).toArray();
 printjson(resR1);
 
 
 // -----------------------------------------------------------------------------
-// R2: Búsqueda sobre el array 'actors' usando notación de punto
+// R2: Búsqueda adentro de una lista con notación de punto
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Encuentra películas donde actúa PENELOPE GUINESS.
-// [POR QUÉ ES CLAVE]: 'actors.firstName' busca directo dentro del arreglo interno sin hacer ningún JOIN.
+// [QUÉ BUSCA]: Películas donde actúe PENELOPE GUINESS.
+// [CÓMO FUNCIONA]: "actors.firstName": "PENELOPE" le dice a Mongo que entre a la lista 'actors' y busque ese nombre sin cruzar ninguna tabla.
 print("\n[R2] Películas donde actúa PENELOPE GUINESS (primeras 3):");
 const resR2 = db.film.find(
     { "actors.firstName": "PENELOPE", "actors.lastName": "GUINESS" },
@@ -412,10 +338,10 @@ printjson(resR2);
 
 
 // -----------------------------------------------------------------------------
-// R3: Consulta anidada profunda en 'location' (city -> country)
+// R3: Consulta anidada de dos niveles (ciudad -> país)
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Busca direcciones ubicadas en 'United Kingdom'.
-// [NOTACIÓN PUNTO]: 'city.country.country' accede al objeto país dentro del objeto ciudad.
+// [QUÉ BUSCA]: Direcciones de 'United Kingdom'.
+// [NOTACIÓN DE PUNTO]: 'city.country.country' entra al objeto ciudad y luego al objeto país.
 print("\n[R3] Direcciones ubicadas en 'United Kingdom' (primeras 3):");
 const resR3 = db.location.find(
     { "city.country.country": "United Kingdom" },
@@ -425,9 +351,9 @@ printjson(resR3);
 
 
 // -----------------------------------------------------------------------------
-// R4: Consulta sobre arriendos pendientes de devolución (returnDate: null)
+// R4: Buscar películas pendientes de devolución
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Encuentra clientes que tienen arriendos sin devolver.
+// [QUÉ BUSCA]: Clientes que tienen returnDate: null (es decir, aún tienen la película en la casa y no la han devuelto).
 print("\n[R4] Clientes con arriendos pendientes de retorno (primeros 2):");
 const resR4 = db.customer.find(
     { "rentals.returnDate": null },
@@ -437,25 +363,25 @@ printjson(resR4);
 
 
 // -----------------------------------------------------------------------------
-// R5: Pipeline de agregación: Facturación total por cliente (Top 5 clientes)
+// R5: Pipeline de agregación: ¿Quiénes son los clientes que más plata han pagado?
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Suma todo el dinero pagado por cada cliente a lo largo de su historial.
-// [RESULTADO]: 1° Karl Seal ($221.55), 2° Eleanor Hunt ($216.54), 3° Clara Shaw ($195.58).
+// [EL REPORTE]: Suma todo el dinero de los arriendos de cada cliente.
+// [RESULTADO REAL]: 1° Karl Seal ($221.55), 2° Eleanor Hunt ($216.54), 3° Clara Shaw ($195.58).
 print("\n[R5] PIPELINE AGREGACIÓN: Top 5 clientes por monto total pagado:");
 const resR5 = db.customer.aggregate([
     // Paso 1: $unwind abre la lista de arriendos en filas individuales
     { $unwind: "$rentals" },
-    // Paso 2: $match descarta los arriendos que no tengan pago registrado
+    // Paso 2: $match descarta arriendos que no tengan boleta de pago
     { $match: { "rentals.payment": { $ne: null } } },
-    // Paso 3: $group agrupa por customerId y suma los montos pagados
+    // Paso 3: $group agrupa por cliente y suma los montos con $sum
     {
         $group: {
             _id: {
                 customerId: "$customerId",
-                cliente: { $concat: ["$firstName", " ", "$lastName"] } // Concatena nombre y apellido
+                cliente: { $concat: ["$firstName", " ", "$lastName"] } // Une nombre y apellido
             },
-            totalPagado: { $sum: "$rentals.payment.amount" },           // Suma montos de pago
-            transacciones: { $sum: 1 }                                  // Cuenta cantidad de pagos
+            totalPagado: { $sum: "$rentals.payment.amount" },           // Suma el dinero pagado
+            transacciones: { $sum: 1 }                                  // Cuenta cuántos arriendos hizo
         }
     },
     // Paso 4: $project limpia la salida y redondea los decimales a 2 dígitos
@@ -468,7 +394,7 @@ const resR5 = db.customer.aggregate([
             transacciones: 1
         }
     },
-    // Paso 5: $sort ordena de mayor a menor según el dinero pagado
+    // Paso 5: $sort ordena de mayor a menor gasto
     { $sort: { totalPagado: -1 } },
     // Paso 6: $limit deja solo a los 5 primeros
     { $limit: 5 }
@@ -477,30 +403,30 @@ printjson(resR5);
 
 
 // -----------------------------------------------------------------------------
-// R6: Pipeline de agregación: Total de películas y tarifa promedio por categoría
+// R6: Pipeline de agregación: Cantidad de películas y precio promedio por género
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Cuenta cuántas películas hay por género y saca la tarifa promedio de arriendo.
-// [RESULTADO]: Sports lidera con 74 películas a $3.13 promedio.
+// [EL REPORTE]: Cuenta cuántas películas hay por categoría y saca el precio promedio.
+// [RESULTADO REAL]: Sports tiene 74 películas a $3.13 dólares promedio.
 print("\n[R6] PIPELINE AGREGACIÓN: Total películas y tarifa promedio por categoría (Top 5):");
 const resR6 = db.film.aggregate([
-    // Paso 1: Agrupa por el nombre de la categoría embebida ($category.name)
+    // Paso 1: Agrupa por el nombre de la categoría ($category.name)
     {
         $group: {
             _id: "$category.name",
-            totalPeliculas: { $sum: 1 },             // Cuenta 1 por cada película encontrada
-            tarifaPromedio: { $avg: "$rentalRate" }   // $avg calcula el promedio de tarifa
+            totalPeliculas: { $sum: 1 },             // Suma 1 por cada película encontrada
+            tarifaPromedio: { $avg: "$rentalRate" }   // $avg calcula el promedio de precio
         }
     },
-    // Paso 2: Da formato limpio a la salida
+    // Paso 2: Limpia la salida y redondea el promedio a 2 decimales
     {
         $project: {
             _id: 0,
             categoria: "$_id",
             totalPeliculas: 1,
-            tarifaPromedio: { $round: ["$tarifaPromedio", 2] } // Redondea a 2 decimales
+            tarifaPromedio: { $round: ["$tarifaPromedio", 2] }
         }
     },
-    // Paso 3: Ordena por cantidad de títulos descendente
+    // Paso 3: Ordena por cantidad de películas de mayor a menor
     { $sort: { totalPeliculas: -1 } },
     { $limit: 5 }
 ]).toArray();
@@ -508,18 +434,19 @@ printjson(resR6);
 
 
 // =============================================================================
-// 3. OPERACIONES UPDATE (ACTUALIZACIONES)
+// 3. OPERACIONES UPDATE (MODIFICAR DATOS)
 // =============================================================================
+// [OBJETIVO]: Demostrar cómo cambiar valores, agregar a listas o modificar un solo arriendo.
 print("\n=====================================================================");
 print("3. OPERACIONES UPDATE (ACTUALIZACIONES)");
-
+print("=====================================================================");
 
 // -----------------------------------------------------------------------------
-// U1: Actualización de campos escalares con $set
+// U1: Modificar valores simples con $set
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Cambia la tarifa de arriendo a 5.99 y la duración a 7 días en la película 1001.
-// [OPERADOR]: $set solo modifica los campos indicados sin borrar el resto del documento.
-print("\n[U1] Actualización escalar de tarifa y duración (filmId: 1001)...");
+// [QUÉ HACE]: Sube la tarifa a 5.99 y la duración a 7 días en la película 1001.
+// [OPERADOR $set]: Solo cambia los campos mencionados; no borra nada del resto de la película.
+print("\n[U1] Actualización simple de tarifa y duración (filmId: 1001)...");
 const resU1 = db.film.updateOne(
     { filmId: 1001 },
     { $set: { rentalRate: 5.99, rentalDuration: 7, lastUpdate: new Date() } }
@@ -528,10 +455,10 @@ printjson(resU1);
 
 
 // -----------------------------------------------------------------------------
-// U2: Inserción de un nuevo arriendo con $push dentro de la lista 'rentals'
+// U2: Agregar un arriendo nuevo a la lista con $push
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Agrega un arriendo nuevo al cliente 347 sin tocar los 30 arriendos que ya tenía.
-// [OPERADOR]: $push añade un elemento al final de un arreglo.
+// [QUÉ HACE]: El cliente 347 vino a arrendar una película nueva. Con $push se la agregamos a su lista sin tocar los otros 30 arriendos que ya tenía.
+// [OPERADOR $push]: Inserta un elemento al final de una lista.
 print("\n[U2] Agregar nuevo arriendo con $push al cliente 347...");
 const resU2 = db.customer.updateOne(
     { customerId: 347 },
@@ -554,30 +481,30 @@ const resU2 = db.customer.updateOne(
                 }
             }
         },
-        $set: { lastUpdate: new Date() } // Actualiza la fecha de modificación del cliente
+        $set: { lastUpdate: new Date() }
     }
 );
 printjson(resU2);
 
 
 // -----------------------------------------------------------------------------
-// U3: Modificación posicional precisa con arrayFilters (Registrar devolución)
+// U3: Modificar solo un arriendo puntual con arrayFilters (Registrar devolución)
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Marca como devuelto (asigna returnDate) ÚNICAMENTE al arriendo 16051.
-// [POR QUÉ ES CLAVE]: arrayFilters permite modificar un elemento puntual adentro de una lista sin alterar los otros arriendos del cliente.
-print("\n[U3] Registrar fecha de devolución en subdocumento mediante arrayFilters...");
+// [QUÉ HACE]: El cliente 347 vino a devolver ÚNICAMENTE la película del arriendo 16051.
+// [POR QUÉ ES CLAVE]: arrayFilters le dice a Mongo: "Modifícale la fecha de devolución SOLAMENTE al arriendo 16051; deja intactos los otros 29 arriendos".
+print("\n[U3] Registrar fecha de devolución en un solo arriendo con arrayFilters...");
 const resU3 = db.customer.updateOne(
     { customerId: 347 },
     {
         $set: {
-            // $[elem] apunta al elemento exacto que cumple la condición de arrayFilters abajo
+            // $[elem] apunta al arriendo exacto que coincide con el filtro de abajo
             "rentals.$[elem].returnDate": new Date(),
             "rentals.$[elem].lastUpdate": new Date(),
             lastUpdate: new Date()
         }
     },
     {
-        // Filtro que identifica cuál arriendo modificar dentro de la lista
+        // Filtro: busca únicamente el arriendo cuyo rentalId sea 16051
         arrayFilters: [{ "elem.rentalId": 16051 }]
     }
 );
@@ -585,15 +512,15 @@ printjson(resU3);
 
 
 // -----------------------------------------------------------------------------
-// U4: Actualización masiva con $inc (Incremento de valores numéricos)
+// U4: Modificación numérica masiva con $inc
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Sube en 50 centavos ($0.50) el costo de reemplazo de todas las películas infantiles ('G').
-// [OPERADOR]: $inc suma o resta valores numéricos directamente en la base de datos sin tener que leerlos antes.
+// [QUÉ HACE]: Sube en 50 centavos ($0.50) el costo de reemplazo de todas las películas infantiles ('G').
+// [OPERADOR $inc]: Suma o resta números directamente en el disco sin tener que leerlos antes.
 print("\n[U4] Incremento masivo ($inc) de costo de reemplazo para películas 'G'...");
 const resU4 = db.film.updateMany(
     { rating: "G" },
     {
-        $inc: { replacementCost: 0.50 }, // Suma 0.50 al valor actual
+        $inc: { replacementCost: 0.50 }, // Suma 0.50 al valor que ya tenía
         $set: { lastUpdate: new Date() }
     }
 );
@@ -601,31 +528,32 @@ printjson(resU4);
 
 
 // =============================================================================
-// 4. OPERACIONES DELETE (ELIMINACIONES)
+// 4. OPERACIONES DELETE (BORRAR DATOS)
 // =============================================================================
+// [OBJETIVO]: Demostrar cómo borrar documentos enteros o sacar un solo arriendo de la lista.
 print("\n=====================================================================");
 print("4. OPERACIONES DELETE (ELIMINACIONES)");
-
+print("=====================================================================");
 
 // -----------------------------------------------------------------------------
-// D1: Eliminación individual de un documento entero (deleteOne)
+// D1: Borrar una película completa con deleteOne
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Borra físicamente la película con ID 1002 de la colección 'film'.
+// [QUÉ HACE]: Elimina físicamente la película 1002 de la colección 'film'.
 print("\n[D1] Eliminación de película individual (filmId: 1002)...");
 const resD1 = db.film.deleteOne({ filmId: 1002 });
 printjson(resD1);
 
 
 // -----------------------------------------------------------------------------
-// D2: Eliminación de un subdocumento con $pull (Anulación de arriendo)
+// D2: Sacar un arriendo cancelado de la lista con $pull
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Quita el arriendo 16050 de la lista 'rentals' del cliente 600.
-// [POR QUÉ ES CLAVE]: $pull remueve solo ese elemento de la lista sin borrar al cliente.
+// [QUÉ HACE]: Un cliente canceló un arriendo por error (ID 16050).
+// [POR QUÉ SE USA $pull]: Porque $pull saca el arriendo de la lista SIN borrar la cuenta del cliente.
 print("\n[D2] Remoción de arriendo anulado con $pull en el cliente 600...");
 const resD2 = db.customer.updateOne(
     { customerId: 600 },
     {
-        // $pull jala (elimina) los elementos del arreglo que coincidan con la condición
+        // $pull jala (extrae y elimina) solo el arriendo que cumpla la condición
         $pull: {
             rentals: { rentalId: 16050 }
         },
@@ -636,13 +564,12 @@ printjson(resD2);
 
 
 // -----------------------------------------------------------------------------
-// D3: Eliminación masiva condicional con deleteMany
+// D3: Borrado masivo condicional con deleteMany
 // -----------------------------------------------------------------------------
-// [QUÉ ES]: Borra todos los clientes de prueba que tengan un correo temporal terminado en '@test.sakilacustomer.org'.
-// [PATRÓN REGEX]: /.*@test\.sakilacustomer\.org$/i es una expresión regular para detectar correos de prueba.
+// [QUÉ HACE]: Borra todos los clientes de prueba temporales que terminen en '@test.sakilacustomer.org'.
 print("\n[D3] Eliminación masiva condicional de clientes temporales...");
 const resD3 = db.customer.deleteMany({
-    email: /.*@test\.sakilacustomer\.org$/i
+    email: /.*@test\.sakilacustomer\.org$/i // Expresión regular que busca correos de prueba
 });
 printjson(resD3);
 
@@ -650,14 +577,13 @@ printjson(resD3);
 // =============================================================================
 // 5. RESUMEN Y COMPROBACIÓN FINAL
 // =============================================================================
-// [QUÉ ES]: Muestra el conteo final de documentos en las 4 colecciones.
-// [PARA QUÉ SIRVE]: Comprueba que todas las operaciones terminaron con éxito y que la base de datos está consistente.
+// [QUÉ ES]: Cuenta los documentos finales para comprobar que todo terminó con éxito.
 print("\n=====================================================================");
 print("5. RESUMEN Y COMPROBACIÓN FINAL");
-
-print("Conteo final de documentos:");
-print("customer: " + db.customer.countDocuments());
-print("film:     " + db.film.countDocuments());
-print("location: " + db.location.countDocuments());
-print("store:    " + db.store.countDocuments());
+print("=====================================================================");
+print("Conteo final de documentos en la base de datos:");
+print("customer (Clientes):    " + db.customer.countDocuments());
+print("film (Películas):       " + db.film.countDocuments());
+print("location (Direcciones): " + db.location.countDocuments());
+print("store (Tiendas):        " + db.store.countDocuments());
 print("\n>>> SCRIPT CRUD Y REESTRUCTURACIÓN EJECUTADO EXITOSAMENTE <<<\n");
